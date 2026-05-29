@@ -1,281 +1,222 @@
-# 🤖 Resume AI — Custom LLM Built From Scratch
+# 🔒 EdgeLLM — Privacy-First On-Device AI
 
-> **A real AI brain trained to read and write resumes — built by a DevOps Engineer using zero dollars and free cloud GPUs**
+> **An open source platform where your text NEVER leaves your device — AI that respects your privacy**
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
-![HuggingFace](https://img.shields.io/badge/HuggingFace-FFD21E?style=flat-square&logo=huggingface&logoColor=black)
-![Gradio](https://img.shields.io/badge/Gradio-FF7C00?style=flat-square&logo=gradio&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Live-brightgreen?style=flat-square)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Building-orange?style=flat-square)
 
 ---
 
-## 🎯 What Does This Project Do?
-- 📄 Reads 40 professional tech resumes as training data
-- 🧠 Trains a GPT-2 language model from scratch — meaning we built the AI brain ourselves
-- 🔧 Fine-tunes it with LoRA — a smart trick to make training faster and cheaper
-- 🚀 Deploys it live on HuggingFace — anyone in the world can use it for free
-- 💬 Chat with it using Gradio — a simple web interface
+## 🧠 The Core Concept — What Are Vectors?
 
-## 🗺️ The Complete Journey — Step By Step
+When you write "The dog ran fast" that sentence has a meaning. A vector captures that meaning as a list of numbers.
 
-### Step 1 — Understanding What an LLM Is
+Same meaning = similar numbers. Different meaning = very different numbers. The server only sees numbers — NEVER your actual words!
 
-LLM stands for Large Language Model. It is the technology behind ChatGPT, Claude, and Gemini.
+## 🗺️ Complete Architecture
 
-How does it work?
-- You give it millions of words to read
-- It learns the patterns — which words usually follow which words
-- After learning, it can predict and generate new text
+YOUR DEVICE (Nothing private leaves here!)
+- Your Text goes into a Local Embedding Model
+- The model converts text to a Vector locally
+- Only the VECTOR travels to the server
 
-Our model is small (GPT-2 with 117 million parameters) but the concept is exactly the same as the big models.
+EDGELLM SERVER (Never sees your actual words!)
+- Receives Vector
+- Runs Vector Database Search
+- LLM generates answer
+- Sends answer back to you
 
-### Step 2 — Collecting the Training Data
+## 🗺️ Step-By-Step Build Guide
 
-Training data is the information we use to teach the AI.
+### Step 1 — Understanding the Privacy Problem
 
-For this project:
-- We collected 40 professional resumes from real DevOps, MLOps, and Cloud engineers
-- Each resume had sections like: Summary, Work Experience, Skills, Certifications
-- We formatted everything as clean plain text
-- We saved it all in one file called `resume_data.txt`
-- Total size: about 100 KB of text
+When you use ChatGPT or any cloud AI:
+- Your medical questions go to OpenAI servers
+- Your business documents go to their servers
+- Your personal conversations go to their servers
 
-Example of what training data looks like:
+For hospitals, law firms, and banks — this is a huge problem.
 
+EdgeLLM solution: Run the understanding part of AI locally. Only send mathematical summaries (vectors) to the server.
+
+### Step 2 — Setting Up the Local Embedding Model
+
+We use sentence-transformers/all-MiniLM-L6-v2 — a 22MB model that runs on CPU with no GPU needed.
+
+```python
+# embed_local.py — This runs ON YOUR DEVICE
+from sentence_transformers import SentenceTransformer
+
+# Load the model locally — runs offline after first download
+model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+def embed_text(text: str) -> list:
+    """Convert text to vector — NEVER sends text anywhere!"""
+    vector = model.encode(text)
+    return vector.tolist()
+
+# Example
+my_private_text = "My salary is high"
+vector = embed_text(my_private_text)
+print(f"Vector length: {len(vector)} numbers")
+# Text never left your device!
 ```
-SUMMARY
-Results-driven DevOps Engineer with 5 years of experience building
-CI/CD pipelines and managing Kubernetes clusters on AWS and Azure.
 
-EXPERIENCE
-Senior DevOps Engineer — Tesla (2024-2025)
-- Built hybrid EKS/AKS clusters handling 500+ microservices
-- Reduced deployment time by 60% using ArgoCD and GitOps
-- Implemented MLflow and Kubeflow for ML pipeline automation
+### Step 3 — Building the FastAPI Server
+
+```python
+# server/main.py
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
+import chromadb
+
+app = FastAPI(title="EdgeLLM Server")
+client = chromadb.Client()
+collection = client.create_collection("documents")
+
+class VectorQuery(BaseModel):
+    vector: List[float]  # The vector — NOT the raw text!
+    top_k: int = 3
+
+@app.post("/query")
+async def query(request: VectorQuery):
+    """Answer a question — we only receive a VECTOR, never raw text!"""
+    results = collection.query(
+        query_embeddings=[request.vector],
+        n_results=request.top_k
+    )
+    return {"results": results, "privacy": "Your original text was never sent to this server"}
+
+@app.get("/health")
+async def health():
+    return {"status": "running", "privacy": "guaranteed"}
 ```
 
-### Step 3 — Setting Up the Free GPU Environment
+### Step 4 — The Client Library
 
-Kaggle gives free GPUs:
-- Created a free account at kaggle.com
-- Kaggle gives you 2x NVIDIA T4 GPUs for free
-- You get 30 hours of GPU time per week
+```python
+# client/edgellm_client.py
+from sentence_transformers import SentenceTransformer
+import requests
 
-Setting up the environment:
+class EdgeLLMClient:
+    def __init__(self, server_url: str):
+        self.server_url = server_url
+        self.embedder = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+
+    def ask(self, question: str) -> str:
+        """Ask a question — question text never leaves this device!"""
+        question_vector = self.embedder.encode(question).tolist()
+        response = requests.post(
+            f"{self.server_url}/query",
+            json={"vector": question_vector}
+        )
+        return response.json()
+
+# Usage
+client = EdgeLLMClient("http://localhost:8000")
+answer = client.ask("What are my private documents about?")
+# Your question text never left your machine!
+```
+
+### Step 5 — Docker Container
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY server/ ./server/
+EXPOSE 8000
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
 
 ```bash
-# Install required libraries
-pip install torch transformers datasets tiktoken
-
-# Clone nanoGPT — the training framework by Andrej Karpathy
-git clone https://github.com/karpathy/nanoGPT
-cd nanoGPT
+docker build -t edgellm-server .
+docker run -p 8000:8000 edgellm-server
 ```
 
-### Step 4 — Preparing the Data (Tokenization)
+### Step 6 — Kubernetes Deployment
 
-Tokenization converts words into numbers that the model can process. We used tiktoken (GPT-2 BPE).
-
-```python
-import tiktoken
-import numpy as np
-
-# Load GPT-2's tokenizer
-encoder = tiktoken.get_encoding("gpt2")
-
-# Read our resume training data
-with open("resume_data.txt", "r") as f:
-    text = f.read()
-
-# Convert all words to numbers (tokens)
-tokens = encoder.encode_ordinary(text)
-tokens = np.array(tokens, dtype=np.uint16)
-
-# Split into training (90%) and validation (10%)
-split = int(0.9 * len(tokens))
-train_data = tokens[:split]
-val_data = tokens[split:]
-
-# Save as binary files for fast loading
-train_data.tofile("data/train.bin")
-val_data.tofile("data/val.bin")
-
-print(f"Total tokens: {len(tokens):,}")
-print(f"Training tokens: {len(train_data):,}")
-print(f"Validation tokens: {len(val_data):,}")
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edgellm-server
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: edgellm
+  template:
+    metadata:
+      labels:
+        app: edgellm
+    spec:
+      containers:
+      - name: edgellm-server
+        image: mgkgopikrishna/edgellm-server:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
 ```
-
-### Step 5 — Training the Model From Scratch
-
-Our model configuration:
-
-```python
-# config/train_resume.py
-
-# Model size
-n_layer = 6        # 6 transformer layers (GPT-2 has 12)
-n_head = 6         # 6 attention heads
-n_embd = 384       # 384 dimensions (GPT-2 has 768)
-block_size = 256   # Read 256 tokens at a time
-
-# Training settings
-batch_size = 64        # Process 64 examples at once
-learning_rate = 1e-3   # How fast the model learns
-max_iters = 5000       # Train for 5000 steps
-eval_interval = 500    # Check progress every 500 steps
-
-# Output
-out_dir = "out-resume"  # Save model here
-```
-
-Running the training:
 
 ```bash
-python train.py config/train_resume.py
+kubectl apply -f kubernetes/deployment.yaml
+kubectl get pods
 ```
 
-Training progress:
+## 📊 Privacy Comparison
 
-```
-Iteration    0: loss = 4.26  -- Model knows nothing, guessing randomly
-Iteration  500: loss = 3.14  -- Starting to learn patterns
-Iteration 1000: loss = 2.67  -- Learning resume structure
-Iteration 2000: loss = 2.01  -- Understanding tech terminology
-Iteration 3000: loss = 1.72  -- Getting good at resume language
-Iteration 5000: loss = 1.42  -- Final model — much better!
-```
+| Feature | Normal Cloud AI | EdgeLLM |
+|---------|----------------|---------|
+| Raw text sent to server | YES — Privacy risk! | NEVER |
+| Server sees your questions | YES | NO |
+| Works offline | NO | YES |
+| Open source | Sometimes | Always |
+| GDPR/HIPAA compliant | Depends | By design |
 
-Training time: ~45 minutes on Kaggle's free T4 GPU
-
-### Step 6 — Fine-Tuning With LoRA
-
-LoRA (Low-Rank Adaptation) makes fine-tuning 98% cheaper by only training small adapter layers instead of the full model.
-
-```python
-from transformers import GPT2LMHeadModel, GPT2Tokenizer
-from peft import get_peft_model, LoraConfig, TaskType
-
-# Load base GPT-2
-model = GPT2LMHeadModel.from_pretrained("gpt2")
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-
-# Configure LoRA adapters
-lora_config = LoraConfig(
-    task_type=TaskType.CAUSAL_LM,
-    r=16,                          # Rank
-    lora_alpha=32,                 # Scaling factor
-    lora_dropout=0.1,              # Prevent overfitting
-    target_modules=["c_attn", "c_proj"]
-)
-
-# Apply LoRA to the model
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
-# trainable params: 2,097,152 || all params: 124,734,720 || trainable%: 1.68%
-```
-
-### Step 7 — Deploying to HuggingFace
-
-```python
-from huggingface_hub import HfApi
-
-api = HfApi()
-api.upload_folder(
-    folder_path="./resume-ai-model",
-    repo_id="GopiKrishna88/resume-ai-llm",
-    repo_type="model"
-)
-print("Model uploaded successfully!")
-```
-
-Building the Gradio demo:
-
-```python
-import gradio as gr
-from transformers import pipeline
-
-generator = pipeline("text-generation", model="GopiKrishna88/resume-ai-llm")
-
-def generate_resume_content(prompt, max_length=200):
-    result = generator(prompt, max_length=max_length, num_return_sequences=1,
-                       temperature=0.8, top_p=0.9, do_sample=True)
-    return result[0]["generated_text"]
-
-demo = gr.Interface(
-    fn=generate_resume_content,
-    inputs=[
-        gr.Textbox(label="Enter your prompt",
-                   placeholder="Write a DevOps Engineer summary with Kubernetes experience..."),
-        gr.Slider(50, 500, value=200, label="Response Length")
-    ],
-    outputs=gr.Textbox(label="Generated Resume Content"),
-    title="Resume AI — Powered by GPT-2 + LoRA"
-)
-demo.launch()
-```
-
-## 📊 Results
-
-| Metric | Value |
-|--------|-------|
-| Training Loss (Start) | 4.26 |
-| Training Loss (End) | 1.42 |
-| Parameters Trained (LoRA) | 2M out of 117M |
-| Training Cost | $0 (free Kaggle GPU) |
-| Training Time | ~45 minutes |
-| Deployment | Live on HuggingFace |
-
-## 🛠️ Full Tech Stack
+## 🛠️ Tech Stack
 
 | Tool | What It Does |
 |------|-------------|
 | Python | Main programming language |
-| PyTorch | Deep learning framework |
-| nanoGPT | Training framework to build GPT from scratch |
-| tiktoken | Converts words to numbers (tokenization) |
-| HuggingFace Transformers | Library for pre-trained models |
-| PEFT / LoRA | Makes fine-tuning cheap and fast |
-| Gradio | Creates the web demo interface |
-| Kaggle | Free GPU cloud environment |
-| HuggingFace Hub | Hosts and shares the model |
+| FastAPI | Web server framework |
+| Sentence Transformers | Local embedding model |
+| ChromaDB | Vector database |
+| Docker | Containerization |
+| Kubernetes | Production orchestration |
 
-## 🔧 How To Run This Yourself
+## 🔧 How To Run This
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/mgkgopikrishna/resume-ai-llm
-cd resume-ai-llm
-
-# 2. Install dependencies
-pip install torch transformers datasets tiktoken peft gradio huggingface_hub
-
-# 3. Add your training data to data/resume_data.txt
-
-# 4. Tokenize the data
-python data/prepare.py
-
-# 5. Train from scratch
-python train.py config/train_resume.py
-
-# 6. Fine-tune with LoRA
-python finetune_lora.py
-
-# 7. Run the demo locally
-python app.py
-# Open http://localhost:7860 in your browser
+git clone https://github.com/mgkgopikrishna/edgellm
+cd edgellm
+docker-compose up -d
+pip install -r client/requirements.txt
+python client/example.py
 ```
 
-## 💡 Key Lessons Learned
+## 💡 Key Lessons
 
-- You do not need millions of dollars to build AI — free tools and creativity are enough
-- LoRA is a game changer — 98% fewer parameters to train means anyone can fine-tune
-- Quality data beats quantity — 40 well-formatted resumes outperform 4000 random ones
-- Loss is your compass — watch it fall during training to know you are on the right path
-- HuggingFace democratizes AI — sharing your model with the world takes 5 minutes
+- Privacy by design — build privacy in from the start
+- Vectors are powerful — compare meaning without seeing actual words
+- Docker makes deployment easy — package once, run anywhere
+- Kubernetes handles scale — from 1 user to 1 million, same code
+- Open source builds trust — anyone can verify the privacy claims
 
 ## 👨‍💻 Built By
 
-**Gopi Krishna Marka** — MLOps and DevOps Engineer learning AI from scratch
+**Gopi Krishna Marka** — MLOps Engineer | Cloud Engineer | DevOps Engineer
 
-*Proof that a DevOps Engineer can build and deploy a real LLM using zero dollars*
+*Building AI systems that respect human privacy*
